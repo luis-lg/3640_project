@@ -32,6 +32,7 @@
 <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
 <script>
     let stompClient = null;
+    let currentUsername = null;
 
     function connect() {
         const username = document.getElementById("username").value.trim();
@@ -39,6 +40,8 @@
             alert("Enter a username first.");
             return;
         }
+
+        currentUsername = username;
 
         const socket = new SockJS("/ws"); // backend endpoint from WebSocketConfig
         stompClient = Stomp.over(socket);
@@ -51,6 +54,16 @@
                 const message = JSON.parse(messageFrame.body);
                 showMessage(message);
             });
+
+            //Subscribe to users list
+            stompClient.subscribe("/topic/users", function (frame) {
+                const onlineUsers = JSON.parse(frame.body);
+                console.log("ONLINE USERS:", onlineUsers);
+            });
+
+            //publish user joined to /app/connect
+            stompClient.send("/app/connect", {}, JSON.stringify({ username: username }));
+
         }, function (error) {
             document.getElementById("status").innerText = "Connection error: " + error;
         });
@@ -89,6 +102,13 @@
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
     }
+
+    //Send /disconnect automatically when closing the tab
+    window.addEventListener("beforeunload", function () {
+        if (stompClient && stompClient.connected && currentUsername) {
+        stompClient.send("/app/disconnect", {}, JSON.stringify({ username: currentUsername }));
+        }
+    });
 </script>
 </body>
 </html>
