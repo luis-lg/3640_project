@@ -3,6 +3,7 @@ package com.chatapp.controllers;
 import com.chatapp.models.Message;
 import com.chatapp.services.MessageLogService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,6 +37,22 @@ public class MessageHistoryController {
     body.put("chatroomId", chatroomId);
     body.put("count", messages.size());
     body.put("messages", messages);
+
+    return ResponseEntity.ok(body);
+  }
+
+  /**
+   * Delete all stored messages for a given chatroom.
+   */
+  @DeleteMapping("/history")
+  public ResponseEntity<Map<String, Object>> deleteHistory(
+      @RequestParam("chatroomId") String chatroomId) {
+
+    messageLogService.deleteHistory(chatroomId);
+
+    Map<String, Object> body = new HashMap<>();
+    body.put("chatroomId", chatroomId);
+    body.put("deleted", true);
 
     return ResponseEntity.ok(body);
   }

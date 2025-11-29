@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -17,7 +19,7 @@ import java.util.List;
 
 /**
  * Manages user accounts and stores them in a JSON file (users.json).
- * For this class project we use plain-text passwords to keep things simple.
+ * Passwords are stored as BCrypt hashes, not in plain text.
  */
 @Service
 public class UserService {
@@ -29,6 +31,7 @@ public class UserService {
   private final ObjectMapper objectMapper;
 
   private final List<UserAccount> accounts = new ArrayList<>();
+  private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
   public UserService(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
@@ -84,8 +87,9 @@ public class UserService {
       return false;
     }
 
-    // store normalized username, original password (plain text for now)
-    UserAccount toStore = new UserAccount(username, password);
+    // store normalized username and hashed password
+    String hashed = passwordEncoder.encode(password);
+    UserAccount toStore = new UserAccount(username, hashed);
     accounts.add(toStore);
     saveToFile();
     logger.info("Registered new user: {}", username);
@@ -111,7 +115,11 @@ public class UserService {
       return false;
     }
 
-    return password.equals(existing.getPassword());
+    String storedHash = existing.getPassword();
+    if (storedHash == null || storedHash.isEmpty()) {
+      return false;
+    }
+    return passwordEncoder.matches(password, storedHash);
   }
 
   /**

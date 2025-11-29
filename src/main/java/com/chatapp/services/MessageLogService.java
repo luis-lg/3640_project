@@ -61,6 +61,19 @@ public class MessageLogService {
     return new ArrayList<>(all.subList(fromIndex, all.size()));
   }
 
+  /**
+   * Delete all messages for a chatroom by removing its JSON file.
+   */
+  public synchronized void deleteHistory(String chatroomId) {
+    Path file = getFileForChatroom(chatroomId);
+    try {
+      Files.deleteIfExists(file);
+      logger.info("Deleted message history file {}", file);
+    } catch (IOException e) {
+      logger.error("Failed to delete message log {}: {}", file, e.getMessage());
+    }
+  }
+
   private List<Message> loadAllInternal(Path file) {
     if (!Files.exists(file)) {
       return new ArrayList<>();
