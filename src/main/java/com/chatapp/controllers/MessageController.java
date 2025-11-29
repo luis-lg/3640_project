@@ -15,11 +15,11 @@ public class MessageController {
 
     private static final Logger logger = LoggerFactory.getLogger(MessageController.class);
 
-    // clients will send message to /app/message
+    // clients will send message to /app/message (public chat)
     @MessageMapping("/message")
     // server broadcasts message to /topic/messages
     @SendTo("/topic/messages")
-    public Message handleMessage(@Payload Message userMessage) {
+    public Message handlePublicMessage(@Payload Message userMessage) {
 
         // if the client didn't provide a timestamp, set it on the server
         if (userMessage.getTimestamp() == null || userMessage.getTimestamp().isEmpty()) {
@@ -32,7 +32,29 @@ public class MessageController {
                 userMessage.getTimestamp(),
                 userMessage.getText());
 
+        // force chatroomId to public for clarity
+        userMessage.setChatroomId("public");
+
         // return the message so it gets broadcast to all subscribers
+        return userMessage;
+    }
+
+    // clients will send private messages to /app/private/{chatroomId}
+    // server broadcasts to /topic/private/{chatroomId}
+    @MessageMapping("/private/{chatroomId}")
+    @SendTo("/topic/private/{chatroomId}")
+    public Message handlePrivateMessage(@Payload Message userMessage) {
+
+        if (userMessage.getTimestamp() == null || userMessage.getTimestamp().isEmpty()) {
+            userMessage.setTimestamp(Instant.now().toString());
+        }
+
+        logger.info("Private message in {} from {} at {}: {}",
+                userMessage.getChatroomId(),
+                userMessage.getUser(),
+                userMessage.getTimestamp(),
+                userMessage.getText());
+
         return userMessage;
     }
 }

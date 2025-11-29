@@ -163,10 +163,10 @@
       let currentUser = null;
       let stompClient = null;
 
-      // For now we only support the global public chat in this page.
-      // Later we can extend to private chats using chatroomId.
+      // Global public chat + per-friend private chats using chatroomId.
       const GLOBAL_CHAT_ID = "public";
       let activeChatId = GLOBAL_CHAT_ID;
+      const privateSubscriptions = {}; // chatroomId -> subscription
 
       function init() {
         const stored = window.localStorage.getItem("chatapp.username");
@@ -209,7 +209,7 @@
             const div = document.createElement("div");
             div.className = "item";
             div.textContent = f;
-            // later: clicking a friend will open a private chat
+            div.onclick = () => openPrivateChatWithFriend(f);
             listEl.appendChild(div);
           });
         } catch (err) {
@@ -257,7 +257,7 @@
 
       // ----- Chats (for now, just Global) -----
 
-      function buildInitialChats() {
+      async function buildInitialChats() {
         const listEl = document.getElementById("chats-list");
         listEl.innerHTML = "";
 
@@ -267,6 +267,29 @@
         global.textContent = "Global Chat";
         global.onclick = () => selectChat(GLOBAL_CHAT_ID, global);
         listEl.appendChild(global);
+
+        // Also add a chat entry for each friend (private chatroom)
+        try {
+          const res = await fetch(
+            "/api/friends/list?username=" + encodeURIComponent(currentUser)
+          );
+          const data = await res.json();
+          const friends = data.friends || [];
+
+          friends.forEach(async (friendName) => {
+            const chatId = await fetchChatroomId(friendName);
+            if (!chatId) return;
+
+            const div = document.createElement("div");
+            div.className = "item";
+            div.dataset.chatId = chatId;
+            div.textContent = "Chat with " + friendName;
+            div.onclick = () => selectChat(chatId, div);
+            listEl.appendChild(div);
+          });
+        } catch (err) {
+          console.error("Error building chats from friends:", err);
+        }
 
         document.getElementById("chats-status").textContent =
           "Click a chat to view messages.";
@@ -279,11 +302,49 @@
         items.forEach((i) => i.classList.remove("active"));
         el.classList.add("active");
 
-        // For now we only have global messages; title still updates for UX.
-        const title = chatId === GLOBAL_CHAT_ID ? "Global Chat" : chatId;
+        const title =
+          chatId === GLOBAL_CHAT_ID ? "Global Chat" : "Chat " + chatId;
         document.getElementById("chat-title").textContent = title;
 
-        // In the future we can clear + load history per chatroom.
+        // Clear messages when switching chats for now
+        document.getElementById("messages").innerHTML = "";
+      }
+
+      async function openPrivateChatWithFriend(friendName) {
+        const chatId = await fetchChatroomId(friendName);
+        if (!chatId) return;
+
+        const listEl = document.getElementById("chats-list");
+        let item = Array.from(listEl.querySelectorAll(".item")).find(
+          (el) => el.dataset.chatId === chatId
+        );
+
+        if (!item) {
+          item = document.createElement("div");
+          item.className = "item";
+          item.dataset.chatId = chatId;
+          item.textContent = "Chat with " + friendName;
+          item.onclick = () => selectChat(chatId, item);
+          listEl.appendChild(item);
+        }
+
+        selectChat(chatId, item);
+      }
+
+      async function fetchChatroomId(friendName) {
+        try {
+          const res = await fetch(
+            "/api/friends/chatroom-id?userA=" +
+              encodeURIComponent(currentUser) +
+              "&userB=" +
+              encodeURIComponent(friendName)
+          );
+          const data = await res.json();
+          return data.chatroomId;
+        } catch (err) {
+          console.error("Error fetching chatroomId:", err);
+          return null;
+        }
       }
 
       // ----- WebSocket public chat (reusing existing backend) -----
@@ -302,7 +363,7 @@
             // subscribe to global topic
             stompClient.subscribe("/topic/messages", function (messageFrame) {
               const message = JSON.parse(messageFrame.body);
-              showMessage(message);
+              showMessage(message, GLOBAL_CHAT_ID);
             });
 
             // subscribe to users list (optional)
@@ -338,17 +399,47 @@
         const text = input.value.trim();
         if (!text) return;
 
-        // For now everything goes to the global chat
         const payload = {
           user: currentUser,
           text: text,
+          chatroomId: activeChatId,
         };
 
-        stompClient.send("/app/message", {}, JSON.stringify(payload));
+        if (activeChatId === GLOBAL_CHAT_ID) {
+          stompClient.send("/app/message", {}, JSON.stringify(payload));
+        } else {
+          // private chatroom
+          ensureSubscribedToPrivate(activeChatId);
+          stompClient.send(
+            "/app/private/" + activeChatId,
+            {},
+            JSON.stringify(payload)
+          );
+        }
         input.value = "";
       }
 
-      function showMessage(msg) {
+      function ensureSubscribedToPrivate(chatId) {
+        if (!stompClient || !stompClient.connected) return;
+        if (privateSubscriptions[chatId]) return;
+
+        const sub = stompClient.subscribe(
+          "/topic/private/" + chatId,
+          function (frame) {
+            const message = JSON.parse(frame.body);
+            showMessage(message, chatId);
+          }
+        );
+        privateSubscriptions[chatId] = sub;
+      }
+
+      function showMessage(msg, chatIdHint) {
+        // Only show messages for the active chat
+        const chatId = msg.chatroomId || chatIdHint || GLOBAL_CHAT_ID;
+        if (chatId !== activeChatId && chatId !== GLOBAL_CHAT_ID) {
+          return;
+        }
+
         const container = document.getElementById("messages");
         const div = document.createElement("div");
         div.className = "msg";
