@@ -104,6 +104,12 @@
         font-size: 12px;
         margin-bottom: 4px;
       }
+      #no-messages {
+        color: #888;
+        font-size: 0.9em;
+        text-align: center;
+        margin-top: 8px;
+      }
     </style>
   </head>
   <body>
@@ -143,10 +149,16 @@
       <section id="messages-panel">
         <div id="connection-status">Not connected</div>
         <h2 id="chat-title">No chat selected</h2>
-        <button onclick="clearCurrentChat()" style="align-self: flex-start; margin-bottom: 4px;">
+        <button
+          id="clear-chat-btn"
+          onclick="clearCurrentChat()"
+          style="align-self: flex-start; margin-bottom: 4px"
+          disabled
+        >
           Clear Chat History
         </button>
         <div id="messages"></div>
+        <div id="no-messages">Select a chat to see messages.</div>
         <div id="composer">
           <input
             id="message-input"
@@ -286,6 +298,7 @@
             const div = document.createElement("div");
             div.className = "item";
             div.dataset.chatId = chatId;
+            div.dataset.friendName = friendName;
             div.textContent = "Chat with " + friendName;
             div.onclick = () => selectChat(chatId, div);
             listEl.appendChild(div);
@@ -305,9 +318,9 @@
         items.forEach((i) => i.classList.remove("active"));
         el.classList.add("active");
 
-        const title =
-          chatId === GLOBAL_CHAT_ID ? "Global Chat" : "Chat " + chatId;
+        const title = getChatTitle(chatId, el);
         document.getElementById("chat-title").textContent = title;
+        document.getElementById("clear-chat-btn").disabled = false;
 
         // Load message history for this chatroom
         loadHistoryForChat(chatId);
@@ -326,12 +339,24 @@
           item = document.createElement("div");
           item.className = "item";
           item.dataset.chatId = chatId;
+          item.dataset.friendName = friendName;
           item.textContent = "Chat with " + friendName;
           item.onclick = () => selectChat(chatId, item);
           listEl.appendChild(item);
         }
 
         selectChat(chatId, item);
+      }
+
+      function getChatTitle(chatId, el) {
+        if (chatId === GLOBAL_CHAT_ID) {
+          return "Global Chat";
+        }
+        const friendName = el && el.dataset ? el.dataset.friendName : null;
+        if (friendName) {
+          return "Chat with " + friendName;
+        }
+        return "Chat " + chatId;
       }
 
       async function fetchChatroomId(friendName) {
@@ -353,6 +378,8 @@
       async function loadHistoryForChat(chatId) {
         const container = document.getElementById("messages");
         container.innerHTML = "";
+        const placeholder = document.getElementById("no-messages");
+        placeholder.textContent = "Loading messages...";
         try {
           const res = await fetch(
             "/api/messages/history?chatroomId=" +
@@ -361,9 +388,16 @@
           );
           const data = await res.json();
           const messages = data.messages || [];
-          messages.forEach((m) => showMessage(m, chatId));
+          if (messages.length === 0) {
+            placeholder.textContent = "No messages yet. Say hi!";
+          } else {
+            placeholder.textContent = "";
+            messages.forEach((m) => showMessage(m, chatId));
+          }
         } catch (err) {
           console.error("Error loading history:", err);
+          document.getElementById("no-messages").textContent =
+            "Error loading messages.";
         }
       }
 
@@ -474,10 +508,11 @@
 
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
+        document.getElementById("no-messages").textContent = "";
       }
 
       async function clearCurrentChat() {
-        if (!activeChatId) return;
+        if (!activeChatId || activeChatId === "") return;
         const ok = confirm(
           "Clear history for this chat? This deletes stored messages on the server."
         );
@@ -491,6 +526,8 @@
           );
           // Clear messages in UI
           document.getElementById("messages").innerHTML = "";
+          document.getElementById("no-messages").textContent =
+            "No messages yet. Say hi!";
         } catch (err) {
           console.error("Error clearing history:", err);
         }

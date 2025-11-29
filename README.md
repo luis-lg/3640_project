@@ -257,3 +257,31 @@ This project demonstrates several distributed systems concepts:
      - `/api/auth/register`, `/api/auth/login`
      - `/api/friends/add`, `/api/friends/list`, `/api/friends/chatroom-id`
      - `/api/messages/history` (GET/DELETE)
+
+---
+
+### 7. Suggested Demo Script
+
+This is a short sequence you can follow when presenting the project:
+
+1. **Start the backend**
+   - Run `mvn spring-boot:run` and show the application starting.
+2. **Show login and registration**
+   - Open `login.html` and register two users (e.g. `alice`, `bob`).
+   - Log in as Alice and point out that passwords are stored as BCrypt hashes in `users.json`.
+3. **Open main app and friends**
+   - After login, show `app.html` (friends, chats, messages).
+   - In another browser/incognito window, log in as Bob.
+   - Add each other as friends and show the updated Friends panel.
+4. **Global chat**
+   - With both users in `app.html`, send a few messages in **Global Chat** and show them appearing in both windows.
+5. **Private one-on-one chat**
+   - Click on Bob in Alice’s Friends panel to open a private chat.
+   - Do the same for Alice on Bob’s side.
+   - Exchange a few messages and point out that they only appear in that private chat.
+6. **Message persistence**
+   - Refresh one of the browsers and re-select the same chat.
+   - Show that previous messages are loaded from `messages_public.json` or `messages_<chatroomId>.json`.
+7. **Clear chat history**
+   - Click **Clear Chat History** for a chatroom.
+   - Show that messages disappear from the UI and that reloading no longer shows old messages for that chat.
