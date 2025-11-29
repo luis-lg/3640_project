@@ -320,7 +320,10 @@
 
         const title = getChatTitle(chatId, el);
         document.getElementById("chat-title").textContent = title;
-        document.getElementById("clear-chat-btn").disabled = false;
+        
+        // Only enable clear button for private chats (not global)
+        const clearBtn = document.getElementById("clear-chat-btn");
+        clearBtn.disabled = (chatId === GLOBAL_CHAT_ID);
 
         // Load message history for this chatroom
         loadHistoryForChat(chatId);
