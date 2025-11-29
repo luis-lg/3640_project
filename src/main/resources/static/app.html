@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ChatApp – Friends & Chats</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header>
+      <h1>ChatApp</h1>
+      <div>
+        <span id="header-user"></span>
+        <button onclick="logout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Left: Friends -->
+      <section class="panel">
+        <h2>Friends</h2>
+        <div>
+          <input
+            id="add-friend-input"
+            type="text"
+            placeholder="Friend username"
+            style="width: 100%"
+          />
+          <button style="margin-top: 4px" onclick="addFriend()">Add Friend</button>
+        </div>
+        <div id="friends-status"></div>
+        <div id="friends-list" class="list"></div>
+      </section>
+
+      <!-- Middle: Chats (for now mirrors friends + Global) -->
+      <section class="panel">
+        <h2>Chats</h2>
+        <div id="chats-status"></div>
+        <div id="chats-list" class="list"></div>
+      </section>
+
+      <!-- Right: Messages for selected chat -->
+      <section id="messages-panel">
+        <div id="connection-status">Not connected</div>
+        <h2 id="chat-title">No chat selected</h2>
+        <button
+          id="clear-chat-btn"
+          onclick="clearCurrentChat()"
+          style="align-self: flex-start; margin-bottom: 4px"
+          disabled
+        >
+          Clear Chat History
+        </button>
+        <div id="messages"></div>
+        <div id="typing-indicator"></div>
+        <div id="no-messages">Select a chat to see messages.</div>
+        <div id="composer">
+          <input
+            id="message-input"
+            type="text"
+            placeholder="Type a message and press Enter"
+            onkeydown="handleTypingInput(event);"
+            oninput="handleTypingInput(event);"
+          />
+          <button onclick="sendMessage()">Send</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- SockJS + STOMP -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script>
+      let currentUser = null;
+      let stompClient = null;
+
+      // Global public chat + per-friend private chats using chatroomId.
+      const GLOBAL_CHAT_ID = "public";
+      let activeChatId = GLOBAL_CHAT_ID;
+      const privateSubscriptions = {}; // chatroomId -> subscription
+      
+      // Feature: Online/offline status
+      const onlineUsers = new Set(); // Set of usernames currently online
+      
+      // Feature: Unread message counts
+      const unreadCounts = {}; // chatroomId -> count
+      
+      // Feature: Typing indicators
+      let typingTimeout = null;
+      const typingSubscriptions = {}; // chatroomId -> subscription
+      let currentTypingUser = null; // who is currently typing in active chat
+
+      function init() {
+        const stored = window.localStorage.getItem("chatapp.username");
+        if (!stored) {
+          // Not logged in: go back to login page
+          window.location.href = "/login.html";
+          return;
+        }
+        currentUser = stored;
+        document.getElementById("header-user").textContent =
+          "Logged in as " + currentUser;
+
+        buildInitialChats();
+        loadFriends();
+        connectWebSocket();
+      }
+
+      function logout() {
+        window.localStorage.removeItem("chatapp.username");
+        window.location.href = "/login.html";
+      }
+
+      // ----- Friends -----
+
+      async function loadFriends() {
+        const statusEl = document.getElementById("friends-status");
+        const listEl = document.getElementById("friends-list");
+        listEl.innerHTML = "";
+
+        try {
+          const res = await fetch(
+            "/api/friends/list?username=" + encodeURIComponent(currentUser)
+          );
+          const data = await res.json();
+          const friends = data.friends || [];
+          statusEl.textContent = "You have " + friends.length + " friend(s).";
+          statusEl.style.color = "#555";
+
+          friends.forEach((f) => {
+            const div = document.createElement("div");
+            div.className = "item";
+            div.dataset.friendName = f;
+            const statusDot = onlineUsers.has(f) 
+              ? '<span class="online-dot"></span>' 
+              : '<span class="offline-dot"></span>';
+            div.innerHTML = statusDot + f;
+            div.onclick = () => openPrivateChatWithFriend(f);
+            listEl.appendChild(div);
+          });
+          updateFriendsOnlineStatus(); // refresh after rendering
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error loading friends.";
+          statusEl.style.color = "red";
+        }
+      }
+
+      async function addFriend() {
+        const input = document.getElementById("add-friend-input");
+        const friendName = input.value.trim().toLowerCase();
+        const statusEl = document.getElementById("friends-status");
+
+        if (!friendName) {
+          statusEl.textContent = "Enter a username to add as friend.";
+          statusEl.style.color = "red";
+          return;
+        }
+        if (friendName === currentUser) {
+          statusEl.textContent = "You cannot add yourself as a friend.";
+          statusEl.style.color = "red";
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/friends/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userA: currentUser, userB: friendName }),
+          });
+          const data = await res.json();
+          statusEl.textContent = data.message || "Friend operation complete.";
+          statusEl.style.color = data.success ? "green" : "red";
+          if (data.success) {
+            input.value = "";
+            loadFriends();
+          }
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/friends/add.";
+          statusEl.style.color = "red";
+        }
+      }
+
+      // ----- Chats (for now, just Global) -----
+
+      async function buildInitialChats() {
+        const listEl = document.getElementById("chats-list");
+        listEl.innerHTML = "";
+
+        const global = document.createElement("div");
+        global.className = "item active";
+        global.dataset.chatId = GLOBAL_CHAT_ID;
+        const globalUnread = unreadCounts[GLOBAL_CHAT_ID] || 0;
+        const globalBadge = globalUnread > 0 ? `<span class="unread-badge">${globalUnread}</span>` : '';
+        global.innerHTML = "Global Chat" + globalBadge;
+        global.onclick = () => selectChat(GLOBAL_CHAT_ID, global);
+        listEl.appendChild(global);
+        updateChatUnreadBadge(GLOBAL_CHAT_ID, global);
+
+        // Also add a chat entry for each friend (private chatroom)
+        try {
+          const res = await fetch(
+            "/api/friends/list?username=" + encodeURIComponent(currentUser)
+          );
+          const data = await res.json();
+          const friends = data.friends || [];
+
+          for (const friendName of friends) {
+            const chatId = await fetchChatroomId(friendName);
+            if (!chatId) continue;
+
+            const div = document.createElement("div");
+            div.className = "item";
+            div.dataset.chatId = chatId;
+            div.dataset.friendName = friendName;
+            const unread = unreadCounts[chatId] || 0;
+            const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+            div.innerHTML = "Chat with " + friendName + badge;
+            div.onclick = () => selectChat(chatId, div);
+            listEl.appendChild(div);
+            updateChatUnreadBadge(chatId, div);
+          }
+        } catch (err) {
+          console.error("Error building chats from friends:", err);
+        }
+
+        document.getElementById("chats-status").textContent =
+          "Click a chat to view messages.";
+      }
+
+      function selectChat(chatId, el) {
+        activeChatId = chatId;
+        // highlight selection
+        const items = document.querySelectorAll("#chats-list .item");
+        items.forEach((i) => i.classList.remove("active"));
+        el.classList.add("active");
+
+        const title = getChatTitle(chatId, el);
+        document.getElementById("chat-title").textContent = title;
+        
+        // Only enable clear button for private chats (not global)
+        const clearBtn = document.getElementById("clear-chat-btn");
+        clearBtn.disabled = (chatId === GLOBAL_CHAT_ID);
+
+        // Clear unread count for this chat
+        unreadCounts[chatId] = 0;
+        updateChatUnreadBadge(chatId, el);
+        
+        // Subscribe to typing indicators for this chat
+        ensureSubscribedToTyping(chatId);
+        
+        // Clear typing indicator when switching chats
+        currentTypingUser = null;
+        updateTypingIndicator();
+
+        // Load message history for this chatroom
+        loadHistoryForChat(chatId);
+      }
+
+      async function openPrivateChatWithFriend(friendName) {
+        const chatId = await fetchChatroomId(friendName);
+        if (!chatId) return;
+
+        const listEl = document.getElementById("chats-list");
+        let item = Array.from(listEl.querySelectorAll(".item")).find(
+          (el) => el.dataset.chatId === chatId
+        );
+
+        if (!item) {
+          item = document.createElement("div");
+          item.className = "item";
+          item.dataset.chatId = chatId;
+          item.dataset.friendName = friendName;
+          const unread = unreadCounts[chatId] || 0;
+          const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+          item.innerHTML = "Chat with " + friendName + badge;
+          item.onclick = () => selectChat(chatId, item);
+          listEl.appendChild(item);
+          updateChatUnreadBadge(chatId, item);
+        }
+
+        selectChat(chatId, item);
+      }
+
+      function getChatTitle(chatId, el) {
+        if (chatId === GLOBAL_CHAT_ID) {
+          return "Global Chat";
+        }
+        const friendName = el && el.dataset ? el.dataset.friendName : null;
+        if (friendName) {
+          return "Chat with " + friendName;
+        }
+        return "Chat " + chatId;
+      }
+
+      async function fetchChatroomId(friendName) {
+        try {
+          const res = await fetch(
+            "/api/friends/chatroom-id?userA=" +
+              encodeURIComponent(currentUser) +
+              "&userB=" +
+              encodeURIComponent(friendName)
+          );
+          const data = await res.json();
+          return data.chatroomId;
+        } catch (err) {
+          console.error("Error fetching chatroomId:", err);
+          return null;
+        }
+      }
+
+      async function loadHistoryForChat(chatId) {
+        const container = document.getElementById("messages");
+        container.innerHTML = "";
+        const placeholder = document.getElementById("no-messages");
+        placeholder.textContent = "Loading messages...";
+        try {
+          const res = await fetch(
+            "/api/messages/history?chatroomId=" +
+              encodeURIComponent(chatId) +
+              "&limit=50"
+          );
+          const data = await res.json();
+          const messages = data.messages || [];
+          if (messages.length === 0) {
+            placeholder.textContent = "No messages yet. Say hi!";
+          } else {
+            placeholder.textContent = "";
+            messages.forEach((m) => showMessage(m, chatId));
+          }
+        } catch (err) {
+          console.error("Error loading history:", err);
+          document.getElementById("no-messages").textContent =
+            "Error loading messages.";
+        }
+      }
+
+      // ----- WebSocket public chat (reusing existing backend) -----
+
+      function connectWebSocket() {
+        const statusEl = document.getElementById("connection-status");
+
+        const socket = new SockJS("/ws");
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect(
+          {},
+          function (frame) {
+            statusEl.textContent = "Connected as " + currentUser;
+
+            // subscribe to global topic
+            stompClient.subscribe("/topic/messages", function (messageFrame) {
+              const message = JSON.parse(messageFrame.body);
+              showMessage(message, GLOBAL_CHAT_ID);
+              // Increment unread if not viewing global chat
+              if (activeChatId !== GLOBAL_CHAT_ID) {
+                incrementUnread(GLOBAL_CHAT_ID);
+              }
+            });
+
+            // subscribe to users list for online/offline status
+            stompClient.subscribe("/topic/users", function (frame) {
+              const usersList = JSON.parse(frame.body);
+              onlineUsers.clear();
+              usersList.forEach(u => onlineUsers.add(u));
+              updateFriendsOnlineStatus();
+            });
+
+            // notify join
+            stompClient.send(
+              "/app/connect",
+              {},
+              JSON.stringify({ username: currentUser })
+            );
+          },
+          function (error) {
+            statusEl.textContent = "Connection error: " + error;
+          }
+        );
+      }
+
+      function sendMessage() {
+        if (!stompClient || !stompClient.connected) {
+          alert("You must be connected first.");
+          return;
+        }
+        if (!currentUser) {
+          alert("You must be logged in.");
+          return;
+        }
+
+        const input = document.getElementById("message-input");
+        const text = input.value.trim();
+        if (!text) return;
+
+        // Stop typing indicator
+        sendTypingIndicator(false);
+
+        const payload = {
+          user: currentUser,
+          text: text,
+          chatroomId: activeChatId,
+        };
+
+        if (activeChatId === GLOBAL_CHAT_ID) {
+          stompClient.send("/app/message", {}, JSON.stringify(payload));
+        } else {
+          // private chatroom
+          ensureSubscribedToPrivate(activeChatId);
+          stompClient.send(
+            "/app/private/" + activeChatId,
+            {},
+            JSON.stringify(payload)
+          );
+        }
+        input.value = "";
+      }
+      
+      // Feature: Typing indicators
+      function handleTypingInput(event) {
+        if (event.key === 'Enter') {
+          sendMessage();
+          return;
+        }
+        
+        if (!activeChatId || activeChatId === "") return;
+        
+        // Send typing=true
+        sendTypingIndicator(true);
+        
+        // Clear existing timeout
+        if (typingTimeout) {
+          clearTimeout(typingTimeout);
+        }
+        
+        // After 2 seconds of no typing, send typing=false
+        typingTimeout = setTimeout(() => {
+          sendTypingIndicator(false);
+        }, 2000);
+      }
+      
+      function sendTypingIndicator(isTyping) {
+        if (!stompClient || !stompClient.connected || !activeChatId) return;
+        
+        const payload = {
+          user: currentUser,
+          typing: isTyping ? "true" : "false"
+        };
+        
+        if (activeChatId === GLOBAL_CHAT_ID) {
+          stompClient.send("/app/typing/public", {}, JSON.stringify(payload));
+        } else {
+          ensureSubscribedToTyping(activeChatId);
+          stompClient.send("/app/typing/" + activeChatId, {}, JSON.stringify(payload));
+        }
+      }
+      
+      function ensureSubscribedToTyping(chatId) {
+        if (!stompClient || !stompClient.connected) return;
+        if (typingSubscriptions[chatId]) return;
+        
+        const topic = chatId === GLOBAL_CHAT_ID ? "/topic/typing/public" : "/topic/typing/" + chatId;
+        const sub = stompClient.subscribe(topic, function (frame) {
+          const data = JSON.parse(frame.body);
+          // Only show if it's not from current user and typing is true
+          if (data.user !== currentUser && data.typing === "true") {
+            currentTypingUser = data.user;
+            updateTypingIndicator();
+          } else if (data.user !== currentUser && data.typing === "false") {
+            if (currentTypingUser === data.user) {
+              currentTypingUser = null;
+              updateTypingIndicator();
+            }
+          }
+        });
+        typingSubscriptions[chatId] = sub;
+      }
+      
+      function updateTypingIndicator() {
+        const indicator = document.getElementById("typing-indicator");
+        if (currentTypingUser && activeChatId) {
+          indicator.textContent = currentTypingUser + " is typing...";
+        } else {
+          indicator.textContent = "";
+        }
+      }
+      
+      // Feature: Online/offline status helpers
+      function updateFriendsOnlineStatus() {
+        const friends = document.querySelectorAll("#friends-list .item");
+        friends.forEach(item => {
+          const friendName = item.dataset.friendName;
+          if (!friendName) return;
+          
+          const statusDot = onlineUsers.has(friendName) 
+            ? '<span class="online-dot"></span>' 
+            : '<span class="offline-dot"></span>';
+          const name = item.textContent.replace(/[●•]/g, '').trim();
+          item.innerHTML = statusDot + name;
+        });
+      }
+      
+      // Feature: Unread counts helpers
+      function incrementUnread(chatId) {
+        if (!unreadCounts[chatId]) {
+          unreadCounts[chatId] = 0;
+        }
+        unreadCounts[chatId]++;
+        const chatItem = document.querySelector(`#chats-list .item[data-chat-id="${chatId}"]`);
+        if (chatItem) {
+          updateChatUnreadBadge(chatId, chatItem);
+        }
+      }
+      
+      function updateChatUnreadBadge(chatId, el) {
+        const unread = unreadCounts[chatId] || 0;
+        const baseText = chatId === GLOBAL_CHAT_ID 
+          ? "Global Chat" 
+          : "Chat with " + (el.dataset.friendName || "");
+        const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+        el.innerHTML = baseText + badge;
+      }
+
+      function ensureSubscribedToPrivate(chatId) {
+        if (!stompClient || !stompClient.connected) return;
+        if (privateSubscriptions[chatId]) return;
+
+        const sub = stompClient.subscribe(
+          "/topic/private/" + chatId,
+          function (frame) {
+            const message = JSON.parse(frame.body);
+            showMessage(message, chatId);
+            // Increment unread if not viewing this chat
+            if (activeChatId !== chatId) {
+              incrementUnread(chatId);
+            }
+          }
+        );
+        privateSubscriptions[chatId] = sub;
+      }
+
+      function showMessage(msg, chatIdHint) {
+        // Only show messages for the active chat
+        const chatId = msg.chatroomId || chatIdHint || GLOBAL_CHAT_ID;
+        if (chatId !== activeChatId && chatId !== GLOBAL_CHAT_ID) {
+          return;
+        }
+
+        const container = document.getElementById("messages");
+        const div = document.createElement("div");
+        div.className = "msg";
+
+        const time = msg.timestamp ? msg.timestamp : "";
+        div.innerHTML =
+          "<strong>" +
+          (msg.user || "unknown") +
+          ":</strong> " +
+          msg.text +
+          (time ? "<span class='timestamp'>" + time + "</span>" : "");
+
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        document.getElementById("no-messages").textContent = "";
+      }
+
+      async function clearCurrentChat() {
+        if (!activeChatId || activeChatId === "") return;
+        const ok = confirm(
+          "Clear history for this chat? This deletes stored messages on the server."
+        );
+        if (!ok) return;
+
+        try {
+          await fetch(
+            "/api/messages/history?chatroomId=" +
+              encodeURIComponent(activeChatId),
+            { method: "DELETE" }
+          );
+          // Clear messages in UI
+          document.getElementById("messages").innerHTML = "";
+          document.getElementById("no-messages").textContent =
+            "No messages yet. Say hi!";
+        } catch (err) {
+          console.error("Error clearing history:", err);
+        }
+      }
+
+      window.addEventListener("beforeunload", function () {
+        if (stompClient && stompClient.connected && currentUser) {
+          stompClient.send(
+            "/app/disconnect",
+            {},
+            JSON.stringify({ username: currentUser })
+          );
+        }
+      });
+
+      window.addEventListener("load", init);
+    </script>
+  </body>
+</html>
+
+

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ChatApp – Login / Register</title>
+    <link rel="stylesheet" href="/login.css" />
+  </head>
+  <body>
+    <div class="card">
+      <h1>ChatApp</h1>
+      <p>Log in or create an account to start chatting with friends.</p>
+
+      <label>
+        Username
+        <input id="username" type="text" placeholder="e.g. alice" />
+      </label>
+
+      <label>
+        Password
+        <input
+          id="password"
+          type="password"
+          placeholder="Choose a password"
+        />
+      </label>
+
+      <div class="buttons">
+        <button onclick="handleRegister()">Register</button>
+        <button onclick="handleLogin()">Login</button>
+      </div>
+
+      <div id="status"></div>
+
+      <small
+        >After login you will be redirected to the main app page where you can
+        see friends, chats, and messages.</small
+      >
+    </div>
+
+    <script>
+      async function handleRegister() {
+        const user = getCredentials();
+        if (!user) return;
+        const statusEl = document.getElementById("status");
+
+        try {
+          const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(user),
+          });
+          const data = await res.json();
+          statusEl.textContent = data.message || "Registration response received";
+          statusEl.style.color = data.success ? "green" : "red";
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/auth/register";
+          statusEl.style.color = "red";
+        }
+      }
+
+      async function handleLogin() {
+        const user = getCredentials();
+        if (!user) return;
+        const statusEl = document.getElementById("status");
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(user),
+          });
+          const data = await res.json();
+
+          if (data.success) {
+            statusEl.textContent = "Login successful, redirecting...";
+            statusEl.style.color = "green";
+
+            // Store username in localStorage for the main app page
+            window.localStorage.setItem("chatapp.username", user.username);
+
+            // Redirect to main app page (to be implemented as app.html)
+            window.location.href = "/app.html";
+          } else {
+            statusEl.textContent = data.message || "Login failed";
+            statusEl.style.color = "red";
+          }
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/auth/login";
+          statusEl.style.color = "red";
+        }
+      }
+
+      function getCredentials() {
+        const username = document
+          .getElementById("username")
+          .value.trim()
+          .toLowerCase();
+        const password = document.getElementById("password").value.trim();
+        const statusEl = document.getElementById("status");
+
+        if (!username || !password) {
+          statusEl.textContent = "Please enter username and password.";
+          statusEl.style.color = "red";
+          return null;
+        }
+        return { username, password };
+      }
+    </script>
+  </body>
+</html>
+
+
