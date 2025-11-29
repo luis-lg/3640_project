@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ChatApp – Friends & Chats</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+      header {
+        padding: 10px 16px;
+        background: #1f2933;
+        color: #f9fafb;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+      header span {
+        font-size: 14px;
+      }
+      header button {
+        margin-left: 8px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 220px 240px 1fr;
+        height: calc(100vh - 48px);
+      }
+      .panel {
+        border-right: 1px solid #ddd;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .panel h2 {
+        margin-top: 0;
+        margin-bottom: 8px;
+        font-size: 16px;
+      }
+      .list {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px;
+        height: calc(100% - 90px);
+        overflow-y: auto;
+      }
+      .item {
+        padding: 4px 6px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .item:hover {
+        background: #f3f4f6;
+      }
+      .item.active {
+        background: #e5e7eb;
+      }
+      #friends-status,
+      #chats-status {
+        font-size: 12px;
+        margin-top: 6px;
+        min-height: 1.2em;
+      }
+      /* Right column: messages */
+      #messages-panel {
+        padding: 10px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+      #chat-title {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
+      #messages {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 6px;
+        flex: 1;
+        overflow-y: auto;
+        margin-bottom: 8px;
+      }
+      .msg {
+        margin-bottom: 4px;
+      }
+      .timestamp {
+        color: #999;
+        font-size: 0.8em;
+        margin-left: 6px;
+      }
+      #composer {
+        display: flex;
+        gap: 6px;
+      }
+      #composer input {
+        flex: 1;
+        padding: 6px;
+      }
+      #connection-status {
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>ChatApp</h1>
+      <div>
+        <span id="header-user"></span>
+        <button onclick="logout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Left: Friends -->
+      <section class="panel">
+        <h2>Friends</h2>
+        <div>
+          <input
+            id="add-friend-input"
+            type="text"
+            placeholder="Friend username"
+            style="width: 100%"
+          />
+          <button style="margin-top: 4px" onclick="addFriend()">Add Friend</button>
+        </div>
+        <div id="friends-status"></div>
+        <div id="friends-list" class="list"></div>
+      </section>
+
+      <!-- Middle: Chats (for now mirrors friends + Global) -->
+      <section class="panel">
+        <h2>Chats</h2>
+        <div id="chats-status"></div>
+        <div id="chats-list" class="list"></div>
+      </section>
+
+      <!-- Right: Messages for selected chat -->
+      <section id="messages-panel">
+        <div id="connection-status">Not connected</div>
+        <h2 id="chat-title">No chat selected</h2>
+        <div id="messages"></div>
+        <div id="composer">
+          <input
+            id="message-input"
+            type="text"
+            placeholder="Type a message and press Enter"
+            onkeydown="if(event.key==='Enter'){sendMessage();}"
+          />
+          <button onclick="sendMessage()">Send</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- SockJS + STOMP -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script>
+      let currentUser = null;
+      let stompClient = null;
+
+      // For now we only support the global public chat in this page.
+      // Later we can extend to private chats using chatroomId.
+      const GLOBAL_CHAT_ID = "public";
+      let activeChatId = GLOBAL_CHAT_ID;
+
+      function init() {
+        const stored = window.localStorage.getItem("chatapp.username");
+        if (!stored) {
+          // Not logged in: go back to login page
+          window.location.href = "/login.html";
+          return;
+        }
+        currentUser = stored;
+        document.getElementById("header-user").textContent =
+          "Logged in as " + currentUser;
+
+        buildInitialChats();
+        loadFriends();
+        connectWebSocket();
+      }
+
+      function logout() {
+        window.localStorage.removeItem("chatapp.username");
+        window.location.href = "/login.html";
+      }
+
+      // ----- Friends -----
+
+      async function loadFriends() {
+        const statusEl = document.getElementById("friends-status");
+        const listEl = document.getElementById("friends-list");
+        listEl.innerHTML = "";
+
+        try {
+          const res = await fetch(
+            "/api/friends/list?username=" + encodeURIComponent(currentUser)
+          );
+          const data = await res.json();
+          const friends = data.friends || [];
+          statusEl.textContent = "You have " + friends.length + " friend(s).";
+          statusEl.style.color = "#555";
+
+          friends.forEach((f) => {
+            const div = document.createElement("div");
+            div.className = "item";
+            div.textContent = f;
+            // later: clicking a friend will open a private chat
+            listEl.appendChild(div);
+          });
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error loading friends.";
+          statusEl.style.color = "red";
+        }
+      }
+
+      async function addFriend() {
+        const input = document.getElementById("add-friend-input");
+        const friendName = input.value.trim().toLowerCase();
+        const statusEl = document.getElementById("friends-status");
+
+        if (!friendName) {
+          statusEl.textContent = "Enter a username to add as friend.";
+          statusEl.style.color = "red";
+          return;
+        }
+        if (friendName === currentUser) {
+          statusEl.textContent = "You cannot add yourself as a friend.";
+          statusEl.style.color = "red";
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/friends/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userA: currentUser, userB: friendName }),
+          });
+          const data = await res.json();
+          statusEl.textContent = data.message || "Friend operation complete.";
+          statusEl.style.color = data.success ? "green" : "red";
+          if (data.success) {
+            input.value = "";
+            loadFriends();
+          }
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/friends/add.";
+          statusEl.style.color = "red";
+        }
+      }
+
+      // ----- Chats (for now, just Global) -----
+
+      function buildInitialChats() {
+        const listEl = document.getElementById("chats-list");
+        listEl.innerHTML = "";
+
+        const global = document.createElement("div");
+        global.className = "item active";
+        global.dataset.chatId = GLOBAL_CHAT_ID;
+        global.textContent = "Global Chat";
+        global.onclick = () => selectChat(GLOBAL_CHAT_ID, global);
+        listEl.appendChild(global);
+
+        document.getElementById("chats-status").textContent =
+          "Click a chat to view messages.";
+      }
+
+      function selectChat(chatId, el) {
+        activeChatId = chatId;
+        // highlight selection
+        const items = document.querySelectorAll("#chats-list .item");
+        items.forEach((i) => i.classList.remove("active"));
+        el.classList.add("active");
+
+        // For now we only have global messages; title still updates for UX.
+        const title = chatId === GLOBAL_CHAT_ID ? "Global Chat" : chatId;
+        document.getElementById("chat-title").textContent = title;
+
+        // In the future we can clear + load history per chatroom.
+      }
+
+      // ----- WebSocket public chat (reusing existing backend) -----
+
+      function connectWebSocket() {
+        const statusEl = document.getElementById("connection-status");
+
+        const socket = new SockJS("/ws");
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect(
+          {},
+          function (frame) {
+            statusEl.textContent = "Connected as " + currentUser;
+
+            // subscribe to global topic
+            stompClient.subscribe("/topic/messages", function (messageFrame) {
+              const message = JSON.parse(messageFrame.body);
+              showMessage(message);
+            });
+
+            // subscribe to users list (optional)
+            stompClient.subscribe("/topic/users", function (frame) {
+              const onlineUsers = JSON.parse(frame.body);
+              console.log("ONLINE USERS:", onlineUsers);
+            });
+
+            // notify join
+            stompClient.send(
+              "/app/connect",
+              {},
+              JSON.stringify({ username: currentUser })
+            );
+          },
+          function (error) {
+            statusEl.textContent = "Connection error: " + error;
+          }
+        );
+      }
+
+      function sendMessage() {
+        if (!stompClient || !stompClient.connected) {
+          alert("You must be connected first.");
+          return;
+        }
+        if (!currentUser) {
+          alert("You must be logged in.");
+          return;
+        }
+
+        const input = document.getElementById("message-input");
+        const text = input.value.trim();
+        if (!text) return;
+
+        // For now everything goes to the global chat
+        const payload = {
+          user: currentUser,
+          text: text,
+        };
+
+        stompClient.send("/app/message", {}, JSON.stringify(payload));
+        input.value = "";
+      }
+
+      function showMessage(msg) {
+        const container = document.getElementById("messages");
+        const div = document.createElement("div");
+        div.className = "msg";
+
+        const time = msg.timestamp ? msg.timestamp : "";
+        div.innerHTML =
+          "<strong>" +
+          (msg.user || "unknown") +
+          ":</strong> " +
+          msg.text +
+          (time ? "<span class='timestamp'>" + time + "</span>" : "");
+
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      window.addEventListener("beforeunload", function () {
+        if (stompClient && stompClient.connected && currentUser) {
+          stompClient.send(
+            "/app/disconnect",
+            {},
+            JSON.stringify({ username: currentUser })
+          );
+        }
+      });
+
+      window.addEventListener("load", init);
+    </script>
+  </body>
+</html>
+
+
