@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ChatApp – Login / Register</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 40px;
+        display: flex;
+        justify-content: center;
+      }
+      .card {
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        padding: 24px 32px;
+        max-width: 420px;
+        width: 100%;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 8px;
+      }
+      p {
+        margin-top: 0;
+        margin-bottom: 16px;
+        color: #555;
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 8px;
+        margin-top: 4px;
+        box-sizing: border-box;
+      }
+      .buttons {
+        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+      }
+      button {
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      #status {
+        margin-top: 12px;
+        min-height: 1.2em;
+      }
+      small {
+        color: #777;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>ChatApp</h1>
+      <p>Log in or create an account to start chatting with friends.</p>
+
+      <label>
+        Username
+        <input id="username" type="text" placeholder="e.g. alice" />
+      </label>
+
+      <label>
+        Password
+        <input
+          id="password"
+          type="password"
+          placeholder="Choose a password"
+        />
+      </label>
+
+      <div class="buttons">
+        <button onclick="handleRegister()">Register</button>
+        <button onclick="handleLogin()">Login</button>
+      </div>
+
+      <div id="status"></div>
+
+      <small
+        >After login you will be redirected to the main app page where you can
+        see friends, chats, and messages.</small
+      >
+    </div>
+
+    <script>
+      async function handleRegister() {
+        const user = getCredentials();
+        if (!user) return;
+        const statusEl = document.getElementById("status");
+
+        try {
+          const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(user),
+          });
+          const data = await res.json();
+          statusEl.textContent = data.message || "Registration response received";
+          statusEl.style.color = data.success ? "green" : "red";
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/auth/register";
+          statusEl.style.color = "red";
+        }
+      }
+
+      async function handleLogin() {
+        const user = getCredentials();
+        if (!user) return;
+        const statusEl = document.getElementById("status");
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(user),
+          });
+          const data = await res.json();
+
+          if (data.success) {
+            statusEl.textContent = "Login successful, redirecting...";
+            statusEl.style.color = "green";
+
+            // Store username in localStorage for the main app page
+            window.localStorage.setItem("chatapp.username", user.username);
+
+            // Redirect to main app page (to be implemented as app.html)
+            window.location.href = "/app.html";
+          } else {
+            statusEl.textContent = data.message || "Login failed";
+            statusEl.style.color = "red";
+          }
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/auth/login";
+          statusEl.style.color = "red";
+        }
+      }
+
+      function getCredentials() {
+        const username = document
+          .getElementById("username")
+          .value.trim()
+          .toLowerCase();
+        const password = document.getElementById("password").value.trim();
+        const statusEl = document.getElementById("status");
+
+        if (!username || !password) {
+          statusEl.textContent = "Please enter username and password.";
+          statusEl.style.color = "red";
+          return null;
+        }
+        return { username, password };
+      }
+    </script>
+  </body>
+</html>
+
+
