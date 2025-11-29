@@ -110,6 +110,44 @@
         text-align: center;
         margin-top: 8px;
       }
+      /* Online status indicator */
+      .online-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #10b981;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      .offline-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #9ca3af;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      /* Unread badge */
+      .unread-badge {
+        display: inline-block;
+        background: #ef4444;
+        color: white;
+        border-radius: 10px;
+        padding: 2px 6px;
+        font-size: 0.75em;
+        font-weight: bold;
+        margin-left: 6px;
+      }
+      /* Typing indicator */
+      #typing-indicator {
+        color: #888;
+        font-size: 0.85em;
+        font-style: italic;
+        margin-bottom: 4px;
+        min-height: 1.2em;
+      }
     </style>
   </head>
   <body>
@@ -158,13 +196,15 @@
           Clear Chat History
         </button>
         <div id="messages"></div>
+        <div id="typing-indicator"></div>
         <div id="no-messages">Select a chat to see messages.</div>
         <div id="composer">
           <input
             id="message-input"
             type="text"
             placeholder="Type a message and press Enter"
-            onkeydown="if(event.key==='Enter'){sendMessage();}"
+            onkeydown="handleTypingInput(event);"
+            oninput="handleTypingInput(event);"
           />
           <button onclick="sendMessage()">Send</button>
         </div>
@@ -182,6 +222,17 @@
       const GLOBAL_CHAT_ID = "public";
       let activeChatId = GLOBAL_CHAT_ID;
       const privateSubscriptions = {}; // chatroomId -> subscription
+      
+      // Feature: Online/offline status
+      const onlineUsers = new Set(); // Set of usernames currently online
+      
+      // Feature: Unread message counts
+      const unreadCounts = {}; // chatroomId -> count
+      
+      // Feature: Typing indicators
+      let typingTimeout = null;
+      const typingSubscriptions = {}; // chatroomId -> subscription
+      let currentTypingUser = null; // who is currently typing in active chat
 
       function init() {
         const stored = window.localStorage.getItem("chatapp.username");
@@ -223,10 +274,15 @@
           friends.forEach((f) => {
             const div = document.createElement("div");
             div.className = "item";
-            div.textContent = f;
+            div.dataset.friendName = f;
+            const statusDot = onlineUsers.has(f) 
+              ? '<span class="online-dot"></span>' 
+              : '<span class="offline-dot"></span>';
+            div.innerHTML = statusDot + f;
             div.onclick = () => openPrivateChatWithFriend(f);
             listEl.appendChild(div);
           });
+          updateFriendsOnlineStatus(); // refresh after rendering
         } catch (err) {
           console.error(err);
           statusEl.textContent = "Error loading friends.";
@@ -279,9 +335,12 @@
         const global = document.createElement("div");
         global.className = "item active";
         global.dataset.chatId = GLOBAL_CHAT_ID;
-        global.textContent = "Global Chat";
+        const globalUnread = unreadCounts[GLOBAL_CHAT_ID] || 0;
+        const globalBadge = globalUnread > 0 ? `<span class="unread-badge">${globalUnread}</span>` : '';
+        global.innerHTML = "Global Chat" + globalBadge;
         global.onclick = () => selectChat(GLOBAL_CHAT_ID, global);
         listEl.appendChild(global);
+        updateChatUnreadBadge(GLOBAL_CHAT_ID, global);
 
         // Also add a chat entry for each friend (private chatroom)
         try {
@@ -291,18 +350,21 @@
           const data = await res.json();
           const friends = data.friends || [];
 
-          friends.forEach(async (friendName) => {
+          for (const friendName of friends) {
             const chatId = await fetchChatroomId(friendName);
-            if (!chatId) return;
+            if (!chatId) continue;
 
             const div = document.createElement("div");
             div.className = "item";
             div.dataset.chatId = chatId;
             div.dataset.friendName = friendName;
-            div.textContent = "Chat with " + friendName;
+            const unread = unreadCounts[chatId] || 0;
+            const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+            div.innerHTML = "Chat with " + friendName + badge;
             div.onclick = () => selectChat(chatId, div);
             listEl.appendChild(div);
-          });
+            updateChatUnreadBadge(chatId, div);
+          }
         } catch (err) {
           console.error("Error building chats from friends:", err);
         }
@@ -325,6 +387,17 @@
         const clearBtn = document.getElementById("clear-chat-btn");
         clearBtn.disabled = (chatId === GLOBAL_CHAT_ID);
 
+        // Clear unread count for this chat
+        unreadCounts[chatId] = 0;
+        updateChatUnreadBadge(chatId, el);
+        
+        // Subscribe to typing indicators for this chat
+        ensureSubscribedToTyping(chatId);
+        
+        // Clear typing indicator when switching chats
+        currentTypingUser = null;
+        updateTypingIndicator();
+
         // Load message history for this chatroom
         loadHistoryForChat(chatId);
       }
@@ -343,9 +416,12 @@
           item.className = "item";
           item.dataset.chatId = chatId;
           item.dataset.friendName = friendName;
-          item.textContent = "Chat with " + friendName;
+          const unread = unreadCounts[chatId] || 0;
+          const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+          item.innerHTML = "Chat with " + friendName + badge;
           item.onclick = () => selectChat(chatId, item);
           listEl.appendChild(item);
+          updateChatUnreadBadge(chatId, item);
         }
 
         selectChat(chatId, item);
@@ -421,12 +497,18 @@
             stompClient.subscribe("/topic/messages", function (messageFrame) {
               const message = JSON.parse(messageFrame.body);
               showMessage(message, GLOBAL_CHAT_ID);
+              // Increment unread if not viewing global chat
+              if (activeChatId !== GLOBAL_CHAT_ID) {
+                incrementUnread(GLOBAL_CHAT_ID);
+              }
             });
 
-            // subscribe to users list (optional)
+            // subscribe to users list for online/offline status
             stompClient.subscribe("/topic/users", function (frame) {
-              const onlineUsers = JSON.parse(frame.body);
-              console.log("ONLINE USERS:", onlineUsers);
+              const usersList = JSON.parse(frame.body);
+              onlineUsers.clear();
+              usersList.forEach(u => onlineUsers.add(u));
+              updateFriendsOnlineStatus();
             });
 
             // notify join
@@ -456,6 +538,9 @@
         const text = input.value.trim();
         if (!text) return;
 
+        // Stop typing indicator
+        sendTypingIndicator(false);
+
         const payload = {
           user: currentUser,
           text: text,
@@ -475,6 +560,111 @@
         }
         input.value = "";
       }
+      
+      // Feature: Typing indicators
+      function handleTypingInput(event) {
+        if (event.key === 'Enter') {
+          sendMessage();
+          return;
+        }
+        
+        if (!activeChatId || activeChatId === "") return;
+        
+        // Send typing=true
+        sendTypingIndicator(true);
+        
+        // Clear existing timeout
+        if (typingTimeout) {
+          clearTimeout(typingTimeout);
+        }
+        
+        // After 2 seconds of no typing, send typing=false
+        typingTimeout = setTimeout(() => {
+          sendTypingIndicator(false);
+        }, 2000);
+      }
+      
+      function sendTypingIndicator(isTyping) {
+        if (!stompClient || !stompClient.connected || !activeChatId) return;
+        
+        const payload = {
+          user: currentUser,
+          typing: isTyping ? "true" : "false"
+        };
+        
+        if (activeChatId === GLOBAL_CHAT_ID) {
+          stompClient.send("/app/typing/public", {}, JSON.stringify(payload));
+        } else {
+          ensureSubscribedToTyping(activeChatId);
+          stompClient.send("/app/typing/" + activeChatId, {}, JSON.stringify(payload));
+        }
+      }
+      
+      function ensureSubscribedToTyping(chatId) {
+        if (!stompClient || !stompClient.connected) return;
+        if (typingSubscriptions[chatId]) return;
+        
+        const topic = chatId === GLOBAL_CHAT_ID ? "/topic/typing/public" : "/topic/typing/" + chatId;
+        const sub = stompClient.subscribe(topic, function (frame) {
+          const data = JSON.parse(frame.body);
+          // Only show if it's not from current user and typing is true
+          if (data.user !== currentUser && data.typing === "true") {
+            currentTypingUser = data.user;
+            updateTypingIndicator();
+          } else if (data.user !== currentUser && data.typing === "false") {
+            if (currentTypingUser === data.user) {
+              currentTypingUser = null;
+              updateTypingIndicator();
+            }
+          }
+        });
+        typingSubscriptions[chatId] = sub;
+      }
+      
+      function updateTypingIndicator() {
+        const indicator = document.getElementById("typing-indicator");
+        if (currentTypingUser && activeChatId) {
+          indicator.textContent = currentTypingUser + " is typing...";
+        } else {
+          indicator.textContent = "";
+        }
+      }
+      
+      // Feature: Online/offline status helpers
+      function updateFriendsOnlineStatus() {
+        const friends = document.querySelectorAll("#friends-list .item");
+        friends.forEach(item => {
+          const friendName = item.dataset.friendName;
+          if (!friendName) return;
+          
+          const statusDot = onlineUsers.has(friendName) 
+            ? '<span class="online-dot"></span>' 
+            : '<span class="offline-dot"></span>';
+          const name = item.textContent.replace(/[●•]/g, '').trim();
+          item.innerHTML = statusDot + name;
+        });
+      }
+      
+      // Feature: Unread counts helpers
+      function incrementUnread(chatId) {
+        if (!unreadCounts[chatId]) {
+          unreadCounts[chatId] = 0;
+        }
+        unreadCounts[chatId]++;
+        const chatItem = document.querySelector(`#chats-list .item[data-chat-id="${chatId}"]`);
+        if (chatItem) {
+          updateChatUnreadBadge(chatId, chatItem);
+        }
+      }
+      
+      function updateChatUnreadBadge(chatId, el) {
+        const unread = unreadCounts[chatId] || 0;
+        const baseText = chatId === GLOBAL_CHAT_ID 
+          ? "Global Chat" 
+          : "Chat with " + (el.dataset.friendName || "");
+        const badge = unread > 0 ? `<span class="unread-badge">${unread}</span>` : '';
+        el.innerHTML = baseText + badge;
+      }
 
       function ensureSubscribedToPrivate(chatId) {
         if (!stompClient || !stompClient.connected) return;
@@ -485,6 +675,10 @@
           function (frame) {
             const message = JSON.parse(frame.body);
             showMessage(message, chatId);
+            // Increment unread if not viewing this chat
+            if (activeChatId !== chatId) {
+              incrementUnread(chatId);
+            }
           }
         );
         privateSubscriptions[chatId] = sub;

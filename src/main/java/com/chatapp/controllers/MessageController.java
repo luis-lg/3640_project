@@ -10,6 +10,7 @@ import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.stereotype.Controller;
 
 import java.time.Instant;
+import java.util.Map;
 
 @Controller
 public class MessageController {
@@ -68,5 +69,14 @@ public class MessageController {
         messageLogService.append(userMessage);
 
         return userMessage;
+    }
+
+    // Typing indicator: clients send to /app/typing/{chatroomId}
+    // server broadcasts to /topic/typing/{chatroomId}
+    @MessageMapping("/typing/{chatroomId}")
+    @SendTo("/topic/typing/{chatroomId}")
+    public Map<String, String> handleTyping(@Payload Map<String, String> payload) {
+        // payload should contain: { "user": "alice", "typing": "true" or "false" }
+        return payload;
     }
 }
