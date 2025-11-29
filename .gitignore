@@ -35,3 +35,4 @@ build/
 # Application data files (do not commit runtime user data)
 users.json
 friends.json
+messages_*.json

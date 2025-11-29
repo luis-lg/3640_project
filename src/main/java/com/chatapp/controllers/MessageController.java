@@ -1,6 +1,7 @@
 package com.chatapp.controllers;
 
 import com.chatapp.models.Message;
+import com.chatapp.services.MessageLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -14,6 +15,11 @@ import java.time.Instant;
 public class MessageController {
 
     private static final Logger logger = LoggerFactory.getLogger(MessageController.class);
+    private final MessageLogService messageLogService;
+
+    public MessageController(MessageLogService messageLogService) {
+        this.messageLogService = messageLogService;
+    }
 
     // clients will send message to /app/message (public chat)
     @MessageMapping("/message")
@@ -35,6 +41,9 @@ public class MessageController {
         // force chatroomId to public for clarity
         userMessage.setChatroomId("public");
 
+        // append to persistent log
+        messageLogService.append(userMessage);
+
         // return the message so it gets broadcast to all subscribers
         return userMessage;
     }
@@ -54,6 +63,9 @@ public class MessageController {
                 userMessage.getUser(),
                 userMessage.getTimestamp(),
                 userMessage.getText());
+
+        // append to persistent log
+        messageLogService.append(userMessage);
 
         return userMessage;
     }

@@ -306,8 +306,8 @@
           chatId === GLOBAL_CHAT_ID ? "Global Chat" : "Chat " + chatId;
         document.getElementById("chat-title").textContent = title;
 
-        // Clear messages when switching chats for now
-        document.getElementById("messages").innerHTML = "";
+        // Load message history for this chatroom
+        loadHistoryForChat(chatId);
       }
 
       async function openPrivateChatWithFriend(friendName) {
@@ -344,6 +344,23 @@
         } catch (err) {
           console.error("Error fetching chatroomId:", err);
           return null;
+        }
+      }
+
+      async function loadHistoryForChat(chatId) {
+        const container = document.getElementById("messages");
+        container.innerHTML = "";
+        try {
+          const res = await fetch(
+            "/api/messages/history?chatroomId=" +
+              encodeURIComponent(chatId) +
+              "&limit=50"
+          );
+          const data = await res.json();
+          const messages = data.messages || [];
+          messages.forEach((m) => showMessage(m, chatId));
+        } catch (err) {
+          console.error("Error loading history:", err);
         }
       }
 
