@@ -161,6 +161,12 @@
           return;
         }
 
+        if (!onlineUsers.has(friendName)) {
+          statusEl.textContent = "You can only add users who are currently online.";
+          statusEl.style.color = "red";
+          return;
+        }
+
         try {
           const res = await fetch("/api/friends/add", {
             method: "POST",

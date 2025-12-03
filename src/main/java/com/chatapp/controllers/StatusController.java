@@ -14,10 +14,10 @@ import java.util.List;
 
 @Controller
 public class StatusController {
-    private static  Logger logger = LoggerFactory.getLogger(StatusController.class);
+    private static final Logger logger = LoggerFactory.getLogger(StatusController.class);
 
-    private UsersList usersList;
-    private SimpMessagingTemplate messagingTemplate;
+    private final UsersList usersList;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public StatusController(UsersList usersList, SimpMessagingTemplate messagingTemplate){
         this.usersList = usersList;
@@ -37,7 +37,7 @@ public class StatusController {
         usersList.userConnect(username);
 
         List<String> online = usersList.getOnlineUsers();
-        logger.info("User joined: {} | online now: {}", username, online);
+        logger.info("User {} joined / online now: {}", username, online);
 
         // broadcast updated user list to subscribers
         messagingTemplate.convertAndSend("/topic/users", online);

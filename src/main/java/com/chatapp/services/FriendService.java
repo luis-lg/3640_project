@@ -1,6 +1,7 @@
 package com.chatapp.services;
 
 import com.chatapp.models.Friend;
+import com.chatapp.models.User;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -31,8 +32,12 @@ public class FriendService {
 
   private final Set<Friend> friendships = new HashSet<>();
 
-  public FriendService(ObjectMapper objectMapper) {
+  private final UsersList usersList;
+
+  public FriendService(ObjectMapper objectMapper,  UsersList usersList) {
+
     this.objectMapper = objectMapper;
+    this.usersList = usersList;
   }
 
   @PostConstruct
@@ -77,6 +82,11 @@ public class FriendService {
     String b = userB.trim().toLowerCase();
 
     if (a.isEmpty() || b.isEmpty() || a.equals(b)) {
+      return false;
+    }
+
+    if (!usersList.isOnline(b)){
+      logger.info("Friendship rejected: {} is not online (requested by {})", b, a);
       return false;
     }
 

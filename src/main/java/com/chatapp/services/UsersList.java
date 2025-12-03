@@ -32,5 +32,11 @@ public class UsersList {
         return new ArrayList<>(onlineUsers);
     }
 
+    public boolean isOnline(String username){
+        if(username == null || username.isBlank()){
+            return false;
+        }
+        return onlineUsers.contains(username);
+    }
 
 }
