@@ -106,7 +106,7 @@
       }
 
       function logout() {
-        window.localStorage.removeItem("chatapp.username");
+        window.sessionStorage.removeItem("chatapp.username");
         window.location.href = "/login.html";
       }
 

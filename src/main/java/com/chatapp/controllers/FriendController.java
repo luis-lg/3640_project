@@ -1,6 +1,7 @@
 package com.chatapp.controllers;
 
 import com.chatapp.services.FriendService;
+import com.chatapp.services.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -26,10 +27,13 @@ public class FriendController {
   private static final Logger logger = LoggerFactory.getLogger(FriendController.class);
 
   private final FriendService friendService;
+  private final UserService userService;
   private final SimpMessagingTemplate messagingTemplate;
 
-  public FriendController(FriendService friendService, SimpMessagingTemplate messagingTemplate) {
+  public FriendController(FriendService friendService, UserService userService,
+      SimpMessagingTemplate messagingTemplate) {
     this.friendService = friendService;
+    this.userService = userService;
     this.messagingTemplate = messagingTemplate;
   }
 
@@ -45,6 +49,13 @@ public class FriendController {
     String userB = payload.get("userB");
 
     Map<String, Object> body = new HashMap<>();
+
+    // Validate that userB exists
+    if (!userService.userExists(userB)) {
+      body.put("success", false);
+      body.put("message", "User does not exist");
+      return ResponseEntity.ok(body);
+    }
 
     boolean created = friendService.addFriendship(userA, userB);
     if (created) {

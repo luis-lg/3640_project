@@ -123,6 +123,20 @@ public class UserService {
   }
 
   /**
+   * Check if a user exists by username.
+   * 
+   * @param username the username to check (will be normalized)
+   * @return true if the user exists, false otherwise
+   */
+  public synchronized boolean userExists(String username) {
+    if (username == null) {
+      return false;
+    }
+    String normalized = normalize(username);
+    return findByUsername(normalized) != null;
+  }
+
+  /**
    * Helper: find user by normalized username.
    */
   private UserAccount findByUsername(String normalizedUsername) {
