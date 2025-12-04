@@ -68,23 +68,23 @@ public class UserService {
   /**
    * Register a new user.
    *
-   * @return true if the user was created, false if username is invalid or already
-   *         exists.
+   * @return RegistrationResult indicating success or the specific reason for
+   *         failure
    */
-  public synchronized boolean register(UserAccount account) {
+  public synchronized RegistrationResult register(UserAccount account) {
     if (account == null) {
-      return false;
+      return RegistrationResult.INVALID_INPUT;
     }
     String username = normalize(account.getUsername());
     String password = account.getPassword();
 
     if (username == null || username.isEmpty() || password == null || password.isEmpty()) {
-      return false;
+      return RegistrationResult.INVALID_INPUT;
     }
 
     // check if username already exists
     if (findByUsername(username) != null) {
-      return false;
+      return RegistrationResult.USERNAME_EXISTS;
     }
 
     // store normalized username and hashed password
@@ -93,7 +93,16 @@ public class UserService {
     accounts.add(toStore);
     saveToFile();
     logger.info("Registered new user: {}", username);
-    return true;
+    return RegistrationResult.SUCCESS;
+  }
+
+  /**
+   * Result of a registration attempt.
+   */
+  public enum RegistrationResult {
+    SUCCESS,
+    USERNAME_EXISTS,
+    INVALID_INPUT
   }
 
   /**
