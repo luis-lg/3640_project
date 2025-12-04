@@ -132,6 +132,22 @@ header button:hover {
   color: #333;
   display: flex;
   align-items: center;
+  position: relative;
+  user-select: none;
+}
+
+.item .friend-name {
+  flex: 1;
+}
+
+.item:active {
+  background: #e5e7eb;
+  transform: scale(0.98);
+}
+
+.item.long-pressing {
+  background: #fee2e2;
+  border-left: 3px solid #ef4444;
 }
 
 .item:hover {
@@ -332,6 +348,7 @@ header button:hover {
   padding: 4px 0;
   font-weight: 500;
 }
+
 
 /* Scrollbar styling */
 .list::-webkit-scrollbar,

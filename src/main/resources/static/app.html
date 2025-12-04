@@ -133,8 +133,37 @@
             const statusDot = onlineUsers.has(f) 
               ? '<span class="online-dot"></span>' 
               : '<span class="offline-dot"></span>';
-            div.innerHTML = statusDot + f;
+            div.innerHTML = statusDot + '<span class="friend-name">' + f + '</span>';
             div.onclick = () => openPrivateChatWithFriend(f);
+            
+            // Long press to delete
+            let longPressTimer = null;
+            const handleLongPressStart = (e) => {
+              div.classList.add('long-pressing');
+              longPressTimer = setTimeout(() => {
+                e.preventDefault();
+                e.stopPropagation();
+                div.classList.remove('long-pressing');
+                removeFriend(f);
+              }, 500); // 500ms long press
+            };
+            const handleLongPressEnd = () => {
+              if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+              }
+              div.classList.remove('long-pressing');
+            };
+            
+            div.addEventListener('mousedown', handleLongPressStart);
+            div.addEventListener('mouseup', handleLongPressEnd);
+            div.addEventListener('mouseleave', handleLongPressEnd);
+            
+            // Touch support for mobile
+            div.addEventListener('touchstart', handleLongPressStart);
+            div.addEventListener('touchend', handleLongPressEnd);
+            div.addEventListener('touchmove', handleLongPressEnd);
+            
             listEl.appendChild(div);
           });
           updateFriendsOnlineStatus(); // refresh after rendering
@@ -173,10 +202,38 @@
           if (data.success) {
             input.value = "";
             loadFriends();
+            buildInitialChats(); // Refresh chats list
           }
         } catch (err) {
           console.error(err);
           statusEl.textContent = "Error calling /api/friends/add.";
+          statusEl.style.color = "red";
+        }
+      }
+
+      async function removeFriend(friendName) {
+        if (!confirm("Are you sure you want to remove " + friendName + " as a friend?")) {
+          return;
+        }
+
+        const statusEl = document.getElementById("friends-status");
+
+        try {
+          const res = await fetch("/api/friends/remove", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userA: currentUser, userB: friendName }),
+          });
+          const data = await res.json();
+          statusEl.textContent = data.message || "Friend operation complete.";
+          statusEl.style.color = data.success ? "green" : "red";
+          if (data.success) {
+            loadFriends();
+            buildInitialChats(); // Refresh chats list to remove the chat
+          }
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error calling /api/friends/remove.";
           statusEl.style.color = "red";
         }
       }
@@ -368,12 +425,18 @@
             stompClient.subscribe("/topic/friends/" + currentUser, function (frame) {
               const event = JSON.parse(frame.body);
 
-              // only react to the friend-added event type (in case you add more later)
+              // handle friend-added event
               if (event.type === "friend-added") {
                 if (event.userB === currentUser) {
                   // reload the friends list from the backend so the new friend shows up
                   loadFriends();
                 }
+              }
+              // handle friend-removed event
+              if (event.type === "friend-removed") {
+                // reload the friends list to reflect the removal
+                loadFriends();
+                buildInitialChats(); // Also refresh chats list
               }
             });
 
@@ -506,8 +569,8 @@
           const statusDot = onlineUsers.has(friendName) 
             ? '<span class="online-dot"></span>' 
             : '<span class="offline-dot"></span>';
-          const name = item.textContent.replace(/[●•]/g, '').trim();
-          item.innerHTML = statusDot + name;
+          item.innerHTML = statusDot + '<span class="friend-name">' + friendName + '</span>';
+          item.onclick = () => openPrivateChatWithFriend(friendName);
         });
       }
       

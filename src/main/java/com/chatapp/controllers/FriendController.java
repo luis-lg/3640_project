@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -94,6 +95,42 @@ public class FriendController {
     body.put("username", username);
     body.put("friends", friends);
     body.put("count", friends.size());
+
+    return ResponseEntity.ok(body);
+  }
+
+  /**
+   * Remove a friendship between two users.
+   *
+   * Expected JSON body:
+   * { "userA": "alice", "userB": "bob" }
+   */
+  @DeleteMapping("/remove")
+  public ResponseEntity<Map<String, Object>> removeFriend(@RequestBody Map<String, String> payload) {
+    String userA = payload.get("userA");
+    String userB = payload.get("userB");
+
+    Map<String, Object> body = new HashMap<>();
+
+    boolean removed = friendService.removeFriendship(userA, userB);
+    if (removed) {
+      logger.info("Removed friendship between {} and {}", userA, userB);
+      body.put("success", true);
+      body.put("message", "Friend removed successfully");
+
+      // removed friend event payload
+      Map<String, Object> event = new HashMap<>();
+      event.put("type", "friend-removed");
+      event.put("userA", userA);
+      event.put("userB", userB);
+
+      // notify both users over websocket
+      messagingTemplate.convertAndSend("/topic/friends/" + userA, event);
+      messagingTemplate.convertAndSend("/topic/friends/" + userB, event);
+    } else {
+      body.put("success", false);
+      body.put("message", "Friendship does not exist or input invalid");
+    }
 
     return ResponseEntity.ok(body);
   }

@@ -123,6 +123,32 @@ public class FriendService {
   }
 
   /**
+   * Remove a friendship between two users.
+   *
+   * @return true if the friendship was removed, false if it didn't exist or input
+   *         invalid.
+   */
+  public synchronized boolean removeFriendship(String userA, String userB) {
+    if (userA == null || userB == null) {
+      return false;
+    }
+    String a = userA.trim().toLowerCase();
+    String b = userB.trim().toLowerCase();
+
+    if (a.isEmpty() || b.isEmpty() || a.equals(b)) {
+      return false;
+    }
+
+    Friend friendship = new Friend(a, b);
+    boolean removed = friendships.remove(friendship);
+    if (removed) {
+      saveToFile();
+      logger.info("Removed friendship between {} and {}", a, b);
+    }
+    return removed;
+  }
+
+  /**
    * Return a stable chatroom ID for a pair of users, e.g. "alice_bob".
    */
   public String getChatroomId(String userA, String userB) {
