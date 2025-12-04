@@ -25,8 +25,8 @@
       </label>
 
       <div class="buttons">
-        <button onclick="handleRegister()">Register</button>
-        <button onclick="handleLogin()">Login</button>
+        <button type="button" onclick="handleRegister()">Register</button>
+        <button type="button" onclick="handleLogin()">Login</button>
       </div>
 
       <div id="status"></div>
@@ -76,7 +76,7 @@
             statusEl.textContent = "Login successful, redirecting...";
             statusEl.style.color = "green";
 
-            // Store username in localStorage for the main app page
+            // Store username in sessionStorage for the main app page
             window.sessionStorage.setItem("chatapp.username", user.username);
 
             // Redirect to main app page (to be implemented as app.html)

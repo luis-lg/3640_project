@@ -34,16 +34,20 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> register(@RequestBody UserAccount account) {
         Map<String, Object> body = new HashMap<>();
 
-        boolean ok = userService.register(account);
-        if (ok) {
+        UserService.RegistrationResult result = userService.register(account);
+        if (result == UserService.RegistrationResult.SUCCESS) {
             logger.info("Registered user via API: {}", account.getUsername());
             body.put("success", true);
             body.put("message", "Registration successful");
             return ResponseEntity.ok(body);
+        } else if (result == UserService.RegistrationResult.USERNAME_EXISTS) {
+            body.put("success", false);
+            body.put("message", "Username already exists. Please choose a different username.");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
         } else {
             body.put("success", false);
-            body.put("message", "Username invalid or already exists");
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+            body.put("message", "Invalid username or password. Username and password cannot be empty.");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
         }
     }
 
@@ -64,5 +68,3 @@ public class AuthController {
         }
     }
 }
-
-
