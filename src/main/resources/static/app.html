@@ -90,7 +90,7 @@
       let currentTypingUser = null; // who is currently typing in active chat
 
       function init() {
-        const stored = window.localStorage.getItem("chatapp.username");
+        const stored = window.sessionStorage.getItem("chatapp.username");
         if (!stored) {
           // Not logged in: go back to login page
           window.location.href = "/login.html";
@@ -364,6 +364,17 @@
               onlineUsers.clear();
               usersList.forEach(u => onlineUsers.add(u));
               updateFriendsOnlineStatus();
+            });
+            stompClient.subscribe("/topic/friends/" + currentUser, function (frame) {
+              const event = JSON.parse(frame.body);
+
+              // only react to the friend-added event type (in case you add more later)
+              if (event.type === "friend-added") {
+                if (event.userB === currentUser) {
+                  // reload the friends list from the backend so the new friend shows up
+                  loadFriends();
+                }
+              }
             });
 
             // notify join

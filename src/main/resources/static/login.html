@@ -77,7 +77,7 @@
             statusEl.style.color = "green";
 
             // Store username in localStorage for the main app page
-            window.localStorage.setItem("chatapp.username", user.username);
+            window.sessionStorage.setItem("chatapp.username", user.username);
 
             // Redirect to main app page (to be implemented as app.html)
             window.location.href = "/app.html";
